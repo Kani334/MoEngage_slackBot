@@ -2,10 +2,9 @@ const Groq = require("groq-sdk");
 
 const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
 const FALLBACK_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "mixtral-8x7b-32768",
-  "gemma2-9b-it",
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3.8-27b",
 ];
 
 function getGroqModelCandidates() {
@@ -35,7 +34,10 @@ async function callGroqWithFallback(requestFactory) {
     } catch (err) {
       lastError = err;
       const message = err?.message || "";
-      const isModelUnavailable = err?.status === 404 || /model.*(not exist|not found|access)/i.test(message);
+      const isModelUnavailable = err?.status === 404
+        || /model.*(not exist|not found|access|decommissioned)/i.test(message)
+        || err?.code === "model_not_found"
+        || err?.code === "model_decommissioned";
       if (!isModelUnavailable) throw err;
       console.warn(`Groq model "${model}" unavailable. Trying fallback model.`);
     }

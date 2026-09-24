@@ -23,7 +23,7 @@ const { getGroqModelCandidates } = require("../services/groq");
 
 	process.env.GROQ_MODEL = "groq/compound-mini";
 	const candidates = getGroqModelCandidates();
-	assert.ok(candidates.includes("llama-3.3-70b-versatile"), "expected fallback model to be present");
+	assert.ok(candidates.includes("openai/gpt-oss-120b"), "expected fallback model to be present");
 	assert.ok(!candidates.includes("groq/compound-mini"), "expected groq/ prefix to be stripped");
 
 	console.log("feedback parser checks passed");
