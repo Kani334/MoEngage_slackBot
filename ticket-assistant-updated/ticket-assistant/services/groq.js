@@ -1,7 +1,48 @@
 const Groq = require("groq-sdk");
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const MODEL = process.env.GROQ_MODEL || "groq/compound-mini";
+const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
+const FALLBACK_MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "mixtral-8x7b-32768",
+  "gemma2-9b-it",
+];
+
+function getGroqModelCandidates() {
+  const configured = (process.env.GROQ_MODEL || FALLBACK_MODELS[0]).trim();
+  const candidates = [configured, ...FALLBACK_MODELS]
+    .map((model) => model?.replace(/^groq\//i, "").trim())
+    .filter(Boolean)
+    .filter((model, index, arr) => arr.indexOf(model) === index);
+
+  return candidates;
+}
+
+function assertGroqConfigured() {
+  if (!groq) {
+    throw new Error("GROQ_API_KEY is missing. Set it in the Render environment variables.");
+  }
+}
+
+async function callGroqWithFallback(requestFactory) {
+  assertGroqConfigured();
+  let lastError;
+
+  for (const model of getGroqModelCandidates()) {
+    try {
+      const completion = await requestFactory(model);
+      return completion;
+    } catch (err) {
+      lastError = err;
+      const message = err?.message || "";
+      const isModelUnavailable = err?.status === 404 || /model.*(not exist|not found|access)/i.test(message);
+      if (!isModelUnavailable) throw err;
+      console.warn(`Groq model "${model}" unavailable. Trying fallback model.`);
+    }
+  }
+
+  throw lastError || new Error("No Groq model available");
+}
 
 async function withRetry(fn, retries = 2, delayMs = 500) {
   for (let i = 0; i < retries; i++) {
@@ -19,6 +60,7 @@ async function withRetry(fn, retries = 2, delayMs = 500) {
  *            ticket_id, subject, description }
  */
 async function parseIntent(userText) {
+  assertGroqConfigured();
   const systemPrompt = `You are an intent parser for a support-ticket Slack assistant.
 Given a user's message, respond with ONLY a JSON object, no other text, matching:
 {
@@ -34,15 +76,15 @@ Rules:
 - If checking status, extract the ticket number into "ticket_id" (digits only). If no number is given, set it to null.
 - Use "unknown" if the message is unrelated to tickets (e.g. greetings, small talk).`;
 
-  const completion = await withRetry(() => groq.chat.completions.create({
-    model: MODEL,
+  const completion = await withRetry(() => callGroqWithFallback((model) => groq.chat.completions.create({
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userText },
     ],
     response_format: { type: "json_object" },
     temperature: 0,
-  }));
+  })));
 
   try {
     return JSON.parse(completion.choices[0].message.content);
@@ -56,13 +98,14 @@ Rules:
  * friendly Slack message.
  */
 async function formatReply(context, data) {
+  assertGroqConfigured();
   const systemPrompt = `You are a concise, friendly support assistant replying in Slack.
 Turn the given context and data into a short message (2-4 sentences max).
 Use Slack-flavored markdown sparingly (bold with *asterisks*, not headers).
 Do not invent information that isn't in the data. Do not use emoji excessively (0-1 max).`;
 
-  const completion = await withRetry(() => groq.chat.completions.create({
-    model: MODEL,
+  const completion = await withRetry(() => callGroqWithFallback((model) => groq.chat.completions.create({
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       {
@@ -71,12 +114,20 @@ Do not invent information that isn't in the data. Do not use emoji excessively (
       },
     ],
     temperature: 0.4,
-  }));
+  })));
 
   return completion.choices[0].message.content.trim();
 }
 
 async function classifyFaqQuestion(userText, faqCatalog = []) {
+  if (!Array.isArray(faqCatalog) || faqCatalog.length === 0) {
+    return null;
+  }
+
+  if (!groq) {
+    return null;
+  }
+
   if (!process.env.GROQ_API_KEY || !Array.isArray(faqCatalog) || faqCatalog.length === 0) {
     return null;
   }
@@ -90,8 +141,8 @@ If it is not a FAQ question, return:
 Use the exact FAQ question text from the list when matching.
 Keep the meaning faithful; rephrased questions should still match the correct FAQ.`;
 
-  const completion = await withRetry(() => groq.chat.completions.create({
-    model: MODEL,
+  const completion = await withRetry(() => callGroqWithFallback((model) => groq.chat.completions.create({
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       {
@@ -101,7 +152,7 @@ Keep the meaning faithful; rephrased questions should still match the correct FA
     ],
     response_format: { type: "json_object" },
     temperature: 0,
-  }));
+  })));
 
   try {
     const parsed = JSON.parse(completion.choices[0].message.content);
@@ -114,7 +165,7 @@ Keep the meaning faithful; rephrased questions should still match the correct FA
 }
 
 async function rephraseFaqAnswer(question, answer) {
-  if (!process.env.GROQ_API_KEY || !question || !answer) return answer;
+  if (!groq || !question || !answer) return answer;
 
   const systemPrompt = `You are a support assistant. Rephrase the FAQ answer in a natural way for Slack.
 Rules:
@@ -123,8 +174,8 @@ Rules:
 - Do not add new claims or invent details.
 - Return only the rewritten answer text.`;
 
-  const completion = await withRetry(() => groq.chat.completions.create({
-    model: MODEL,
+  const completion = await withRetry(() => callGroqWithFallback((model) => groq.chat.completions.create({
+    model,
     messages: [
       { role: "system", content: systemPrompt },
       {
@@ -133,9 +184,15 @@ Rules:
       },
     ],
     temperature: 0.4,
-  }));
+  })));
 
   return completion.choices[0].message.content.trim() || answer;
 }
 
-module.exports = { parseIntent, formatReply, classifyFaqQuestion, rephraseFaqAnswer };
+module.exports = {
+  parseIntent,
+  formatReply,
+  classifyFaqQuestion,
+  rephraseFaqAnswer,
+  getGroqModelCandidates,
+};
