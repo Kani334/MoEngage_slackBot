@@ -49,16 +49,17 @@ async function addPrivateNote(ticketId, body) {
 }
 
 async function createFeedback({ name, ticket_id, rating_given, contact_email, source = "Slack" }) {
-  const schemaId = process.env.FRESHDESK_FEEDBACK_SCHEMA_ID || "8797869";
+  const schemaId = process.env.FRESHDESK_FEEDBACK_SCHEMA_ID || "8837223";
   const recordsPath = `/custom_objects/schemas/${schemaId}/records`;
   const recordName = String(name || `ticket-${ticket_id || contact_email || "feedback"}`);
+  const recordTicketId = String(ticket_id || recordName);
+  const numericRating = Number(rating_given);
   const payload = {
     data: {
       name: recordName,
-      ticket_id_1: ticket_id == null || ticket_id === "" ? "" : Number(ticket_id),
-      rating_given: String(rating_given),
-      ticket_id: recordName,
-      contact_email: contact_email || "",
+      ticket_id: recordTicketId,
+      final_rating: numericRating,
+      ratings_given: String(rating_given),
       source,
     },
   };
