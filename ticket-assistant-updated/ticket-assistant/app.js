@@ -235,7 +235,8 @@ app.post("/webhook/notify", async (req, res) => {
     const channelId = NOTIFICATION_CHANNEL_ID;
 
     if (isResolvedStatus(payload.status)) {
-      pendingFeedback.set(channelId, { email, ticket_id: ticketId || null });
+      const feedbackChannelId = await slack.openDm(slackUserId);
+      pendingFeedback.set(feedbackChannelId, { email, ticket_id: ticketId || null });
       const blocks = [
         {
           type: "section",
@@ -272,7 +273,7 @@ app.post("/webhook/notify", async (req, res) => {
         });
       }
       const text = "We’d love to know how helpful this response was.\nHow would you rate the support you received?";
-      await slack.postMessage(channelId, text, blocks);
+      await slack.postMessage(feedbackChannelId, text, blocks);
       return res.json({ status: "sent", slack_user: slackUserId, feedback_requested: true });
     }
 
