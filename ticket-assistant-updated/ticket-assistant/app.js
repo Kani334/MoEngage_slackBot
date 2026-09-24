@@ -259,19 +259,6 @@ app.post("/webhook/notify", async (req, res) => {
           })),
         },
       ];
-      if (ticketId) {
-        blocks.push({
-          type: "actions",
-          elements: [
-            {
-              type: "button",
-              action_id: "acknowledge_ticket",
-              text: { type: "plain_text", text: "Acknowledge", emoji: true },
-              value: JSON.stringify({ ticket_id: String(ticketId) }),
-            },
-          ],
-        });
-      }
       const text = "We’d love to know how helpful this response was.\nHow would you rate the support you received?";
       await slack.postMessage(feedbackChannelId, text, blocks);
       return res.json({ status: "sent", slack_user: slackUserId, feedback_requested: true });
